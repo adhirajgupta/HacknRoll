@@ -4,6 +4,9 @@ langchain-core
 langgraph
 langchain-google-genai
 pydantic
+langchain-community
+google-generativeai
+python-dotenv
 typing
 python-dotenv
 requests
