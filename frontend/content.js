@@ -21,6 +21,13 @@
       <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   `;
+  const STATUS_STEPS = [
+    "Thinking…",
+    "Obtaining information…",
+    "Delving into course files…",
+    "Extracting relevant data…",
+    "Formulating response…",  
+  ];
 
   if (document.getElementById(ROOT_ID)) return;
   console.log("Content script loaded");
@@ -292,9 +299,29 @@
         border-color: rgba(76, 175, 80, 0.3);
       }
 
-      .bot strong {
+       .bot strong {
         color: #1B5E20;
         font-weight: 600;
+      }
+
+      .msg.loading {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 3px solid rgba(46, 125, 50, 0.25);
+        border-top-color: #2E7D32;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+        flex-shrink: 0;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
 
       .composer {
@@ -454,6 +481,61 @@
   };
 
   const wireEvents = ({ panel, bar, messagesEl, inputEl, sendBtn, closeBtn, maximizeBtn }) => {
+    let loadingInterval = null;
+    let loadingEl = null;
+
+    const clearLoading = () => {
+      if (loadingInterval) {
+        clearInterval(loadingInterval);
+        loadingInterval = null;
+      }
+      if (loadingEl && loadingEl.parentNode) {
+        loadingEl.parentNode.removeChild(loadingEl);
+      }
+      loadingEl = null;
+      sendBtn.disabled = false;
+    };
+
+    const showLoadingMessage = () => {
+      clearLoading();
+      const div = document.createElement("div");
+      div.className = "msg bot loading";
+
+      const spinner = document.createElement("div");
+      spinner.className = "spinner";
+
+      const text = document.createElement("span");
+      text.textContent = STATUS_STEPS[0];
+
+      div.appendChild(spinner);
+      div.appendChild(text);
+      messagesEl.appendChild(div);
+      messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
+
+      let idx = 0;
+      loadingInterval = setInterval(() => {
+        if(idx === STATUS_STEPS.length - 1) {
+          idx = STATUS_STEPS.length - 1;
+        } else {
+          idx = (idx + 1) % STATUS_STEPS.length;
+          text.textContent = STATUS_STEPS[idx];
+        }
+      }, 3200);
+
+      loadingEl = div;
+      sendBtn.disabled = true;
+    };
+
+    const replaceLoadingWith = (replyText) => {
+      clearLoading();
+      appendMsg(messagesEl, replyText, "bot");
+    };
+
+    const replaceLoadingWithError = () => {
+      clearLoading();
+      appendMsg(messagesEl, "Something went wrong. Please try again.", "bot");
+    };
+
     const openPanel = () => {
       panel.classList.add("open");
       bar.style.display = "none";
@@ -469,6 +551,7 @@
       panel.classList.remove("maximized");
       bar.style.display = "grid";
       maximizeBtn.innerHTML = MAXIMIZE_SVG;
+      clearLoading();
     };
 
     const toggleMaximize = () => {
@@ -481,9 +564,11 @@
     const send = () => {
       const text = (inputEl.value || "").trim();
       if (!text) return;
+      if (loadingEl) return; // prevent overlapping requests
 
       appendMsg(messagesEl, text, "user");
       inputEl.value = "";
+      showLoadingMessage();
 
       console.log("Sending message to backend:", text);
 
@@ -499,15 +584,15 @@
           if (Array.isArray(replyText)) {
             replyText.forEach(item => {
               const text = typeof item === 'string' ? item : (item?.text || item?.content || JSON.stringify(item));
-              appendMsg(messagesEl, text, "bot");
+              replaceLoadingWith(text);
             });
           } else {
-            appendMsg(messagesEl, replyText, "bot");
+            replaceLoadingWith(replyText);
           }
         })
         .catch((err) => {
           console.error("Failed to reach backend:", err);
-          appendMsg(messagesEl, "Backend error: could not send message.", "bot");
+          replaceLoadingWithError();
         });
     };
 

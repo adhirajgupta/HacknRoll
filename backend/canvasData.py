@@ -2,14 +2,16 @@ import canvasapi
 from canvasapi import Canvas
 
 API_URL = "https://canvas.nus.edu.sg"
-API_KEY = "21450~tcuXB7Ex8yQw7MPyh7GmDXBLzrw8mNu3wGwTHAkhN2zzQTkk768Tm2ZWP77f3yyL"
+# API_KEY = "21450~tcuXB7Ex8yQw7MPyh7GmDXBLzrw8mNu3wGwTHAkhN2zzQTkk768Tm2ZWP77f3yyL"
+
+API_KEY = "21450~7MHmATRNnC4uUvvaGLFnw8GDwuku28GWhwTB4wBMYYB83xzRJkBhUnChCfyXFAKr"
 
 canvas = Canvas(API_URL, API_KEY)
 
 def get_courses():
     """
     TOOL SCHEMA - What it does: List Canvas courses the user is enrolled in.
-    When to use: This should be your initial task. Use this to select a course and get its id to execute other actions. 
+    When to use: This should ALWAYS be your initial task. Use this to select a course and get course id to execute other actions. 
     The user may not always type the full course code or course name, select the most appropriate based on their query, or ask them to clarify if needed.
     Inputs: none (uses authenticated Canvas client)
     Output: list of dicts {id, name}.
@@ -31,7 +33,7 @@ def get_courses():
 def get_course_pages(course_id):
     """
     TOOL SCHEMA — What it does: Fetch all pages in a Canvas course and return their titles and bodies.
-    When to use: Use this first when you need some information about the course. If your question is about course content, pages are likely to have the answer. 
+    When to use: Use this first when you need some information about the course. If your question is about course content, course policy, assessment components and dates of important exams of the course,use pages to get the answer. 
     If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {title, html} or an error dict.
@@ -54,7 +56,8 @@ def get_course_pages(course_id):
 def get_course_assignments(course_id):
     """
     TOOL SCHEMA — What it does: Fetch all assignments for a Canvas course with grading, timing, and submission metadata.
-    When to use: User asks about assignments, due dates, points, or submission status.
+    When to use: User asks about assignments, due dates of assignments, points, or submission status.
+    Do not use: User asks about general midterm dates or final exam dates or assessment components/weightages
     If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {name, description, points_possible, grading_type, due_at, lock_at, unlock_at, submission_types, html_url, allowed_attempts, submission_status} or an error dict.
