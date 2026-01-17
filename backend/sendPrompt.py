@@ -105,6 +105,7 @@ def _build_system_message() -> SystemMessage:
             "You are a backend retrieval assistant. Policy:\n"
             "- For Canvas course data use the fetch_* Canvas tools (courses, pages, assignments, files, announcements) "
             "instead of making up answers.\n"
+            "- If a course ID is unclear, first call fetch_courses to list options and/or ask the user to pick one.\n"
             "- Never hallucinate values; prefer tool calls.\n"
             "- Choose the minimal set of tool calls and then respond to the user.\n"
             "- Keep replies concise unless asked otherwise."
@@ -196,10 +197,14 @@ def send_prompt_to_backend(
     text: str,
     *,
     frontend_payload: Optional[dict] = None,
+    existing_messages: Optional[Sequence[BaseMessage]] = None,
 ) -> str:
     """Entry point to run the graph with a user prompt."""
+    base_messages: List[BaseMessage] = list(existing_messages or [])
+    base_messages.append(HumanMessage(content=text))
+
     initial_state: AgentState = {
-        "messages": [HumanMessage(content=text)],
+        "messages": base_messages,
         "number_of_steps": 0,
         "frontend_payload": frontend_payload or {},
     }
@@ -214,9 +219,3 @@ def send_prompt_to_backend(
     print(f"Driver: final Gemini reply -> {final_text}")
     return final_text
 
-
-if __name__ == "__main__":
-    send_prompt_to_backend(
-        "What is the description and points for Assignment 05?",
-        frontend_payload={"user_id": "123", "course_id": "ABC"},
-    )

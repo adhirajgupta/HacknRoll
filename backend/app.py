@@ -1,7 +1,11 @@
 from flask import Flask, jsonify, request
+from dotenv import load_dotenv
 from sendPrompt import send_prompt_to_backend
+from chat.history_chain import build_chain, get_history
 
 app = Flask(__name__)
+load_dotenv()
+chat_chain = build_chain()
 
 
 @app.after_request
@@ -23,14 +27,24 @@ def handle_message():
     # Log incoming payload
     print(f"Received text: {text}")
 
-    additional_prompt = "Do not hallucinate. Provide accurate and concise information. If the information is not available, say 'I don't know'. Dont make up answers." \
-    "Dont generate random dates. Now search the following question: "
+    session_id = (
+        request.headers.get("x-session-id")
+        or request.cookies.get("session_id")
+        or "default"
+    )
 
-    print(f"Appended prompt: {additional_prompt + text}")
+    # Reuse tool-enabled agent while preserving history per session
+    history = get_history(session_id)
+    result_text = send_prompt_to_backend(
+        text,
+        frontend_payload=data,
+        existing_messages=history.messages,
+    )
+    history.add_user_message(text)
+    history.add_ai_message(result_text)
 
-    reply = send_prompt_to_backend(text, frontend_payload=data)
-    print(f"Generated reply in app.js: {reply}")
-    return jsonify({"status": "ok", "echo": text, "reply": reply})
+    print(f"Generated reply: {result_text}")
+    return jsonify({"status": "ok", "echo": text, "reply": result_text, "session_id": session_id})
 
 
 if __name__ == "__main__":

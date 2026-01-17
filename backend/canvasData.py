@@ -8,8 +8,9 @@ canvas = Canvas(API_URL, API_KEY)
 
 def get_courses():
     """
-    TOOL SCHEMA — What it does: List Canvas courses filtered to those whose name contains '[2520]'.
-    When to use: User asks for available courses or to select a course before other actions.
+    TOOL SCHEMA - What it does: List Canvas courses the user is enrolled in.
+    When to use: This should be your initial task. Use this to select a course and get its id to execute other actions. 
+    The user may not always type the full course code or course name, select the most appropriate based on their query, or ask them to clarify if needed.
     Inputs: none (uses authenticated Canvas client)
     Output: list of dicts {id, name}.
     """
@@ -29,8 +30,9 @@ def get_courses():
 
 def get_course_pages(course_id):
     """
-    TOOL SCHEMA — What it does: Fetch all pages in a Canvas course and return their titles and HTML bodies.
-    When to use: User asks for page content, list of course pages, or to retrieve specific page HTML.
+    TOOL SCHEMA — What it does: Fetch all pages in a Canvas course and return their titles and bodies.
+    When to use: Use this first when you need some information about the course. If your question is about course content, pages are likely to have the answer. 
+    If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {title, html} or an error dict.
     """
@@ -53,6 +55,7 @@ def get_course_assignments(course_id):
     """
     TOOL SCHEMA — What it does: Fetch all assignments for a Canvas course with grading, timing, and submission metadata.
     When to use: User asks about assignments, due dates, points, or submission status.
+    If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {name, description, points_possible, grading_type, due_at, lock_at, unlock_at, submission_types, html_url, allowed_attempts, submission_status} or an error dict.
     """
@@ -83,6 +86,7 @@ def get_course_files(course_id):
     """
     TOOL SCHEMA — What it does: List all files in a Canvas course with metadata and download URLs.
     When to use: User asks for course files, resources, or download links.
+    If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {name, created_at, updated_at, url, content_type} or an error dict.
     """
@@ -105,7 +109,8 @@ def get_course_files(course_id):
 def get_course_announcements(course_id):
     """
     TOOL SCHEMA — What it does: Fetch announcements for a Canvas course with content and timestamps.
-    When to use: User asks for recent announcements or instructor notices.
+    When to use: To get additional data about the course which might contain the answer to a user's query.
+    If the answer is not found or you run into an error, try other tools.
     Inputs: course_id (Canvas course ID)
     Output: list of dicts {title, message, posted_at, attachments} or an error dict.
     """
