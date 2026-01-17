@@ -213,10 +213,21 @@
       appendMsg(text, "user");
       inputEl.value = "";
 
-      // Dummy response
-      window.setTimeout(() => {
-        appendMsg(`Dummy reply: I received "${text}"`, "bot");
-      }, 350);
+      console.log("Sending message to backend:", text);
+
+      fetch("http://localhost:5000/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          appendMsg(data.echo || "Received your message.", "bot");
+        })
+        .catch((err) => {
+          console.error("Failed to reach backend:", err);
+          appendMsg("Backend error: could not send message.", "bot");
+        });
     };
 
     bar.addEventListener("click", togglePanel);
