@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, TypedDict
 
+from canvasData import (
+    get_course_announcements,
+    get_course_assignments,
+    get_course_files,
+    get_course_pages,
+    get_courses,
+    canvas as canvas_client,
+)
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -14,6 +21,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field, ValidationError
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
@@ -25,87 +33,64 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     number_of_steps: int
     frontend_payload: Optional[dict]
-    backend_json_path: str
 
 
-def _load_json(path: str) -> Any:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+class CourseInput(BaseModel):
+    course_id: int = Field(..., description="Canvas course ID to operate on.")
 
 
-def _get_by_path(data: Any, path: str) -> Any:
-    """Resolve dot/index path like users.0.email."""
-    parts = [p for p in path.split(".") if p]
-    current: Any = data
-    for part in parts:
-        if isinstance(current, list) and part.isdigit():
-            idx = int(part)
-            if idx >= len(current):
-                raise KeyError(f"index {idx} out of range for list")
-            current = current[idx]
-        elif isinstance(current, dict):
-            if part not in current:
-                raise KeyError(f"key '{part}' not found")
-            current = current[part]
-        else:
-            raise KeyError(f"cannot descend into '{part}' on non-container")
-    return current
+@tool(args_schema=CourseInput)
+def fetch_course_pages(course_id: int) -> Dict[str, Any]:
+    """Return Canvas course pages (title/html); use when asked for page content/list of pages."""
+    print(f"Tool fetch_course_pages: running for course_id={course_id}")
+    return {"pages": get_course_pages(course_id)}
 
 
-def _collect_paths(data: Any, prefix: str = "") -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            new_prefix = f"{prefix}.{k}" if prefix else k
-            results.extend(_collect_paths(v, new_prefix))
-    elif isinstance(data, list):
-        for i, v in enumerate(data):
-            new_prefix = f"{prefix}.{i}" if prefix else str(i)
-            results.extend(_collect_paths(v, new_prefix))
-    else:
-        results.append({"path": prefix, "value": data})
-    return results
+@tool(args_schema=CourseInput)
+def fetch_course_assignments(course_id: int) -> Dict[str, Any]:
+    """Return Canvas course assignments with metadata; use when asked about assignments or due details."""
+    print(f"Tool fetch_course_assignments: running for course_id={course_id}")
+    return {"assignments": get_course_assignments(course_id)}
+
+
+@tool(args_schema=CourseInput)
+def fetch_course_files(course_id: int) -> Dict[str, Any]:
+    """Return Canvas course files with metadata and URLs; use when asked about files/resources."""
+    print(f"Tool fetch_course_files: running for course_id={course_id}")
+    return {"files": get_course_files(course_id)}
+
+
+@tool(args_schema=CourseInput)
+def fetch_course_announcements(course_id: int) -> Dict[str, Any]:
+    """Return Canvas course announcements; use when asked about announcements/notices."""
+    print(f"Tool fetch_course_announcements: running for course_id={course_id}")
+    return {"announcements": get_course_announcements(course_id)}
 
 
 @tool
-def search_backend_json(query: str, backend_json_path: str, top_k: int = 5) -> Dict[str, Any]:
-    """
-    Look up data in the backend JSON file.
-    - Use 'path:<dot.path>' for direct path lookup (e.g., path:assignments.0.name).
-    - Otherwise performs a keyword search across leaf values and returns top_k matches.
-    """
-    print(f"Tool search_backend_json: reading JSON at {backend_json_path}")
-    data = _load_json(backend_json_path)
-    if query.startswith("path:"):
-        dot_path = query[len("path:") :].strip()
-        try:
-            value = _get_by_path(data, dot_path)
-            return {"mode": "path", "path": dot_path, "value": value}
-        except KeyError as err:
-            return {"mode": "path", "path": dot_path, "error": str(err)}
+def fetch_courses() -> Dict[str, Any]:
+    """List available courses; use to let the user pick a course before fetching details."""
+    print("Tool fetch_courses: listing courses")
+    return {"courses": get_courses()}
 
-    leaves = _collect_paths(data)
-    query_lower = query.lower()
-    matches = [
-        leaf for leaf in leaves if query_lower in str(leaf["value"]).lower()
-    ]
-    print(f"Tool search_backend_json: keyword search for '{query}', returning up to {top_k} results.")
-    return {"mode": "search", "query": query, "results": matches[:top_k]}
+
+ALL_TOOLS = [
+    fetch_courses,
+    fetch_course_pages,
+    fetch_course_assignments,
+    fetch_course_files,
+    fetch_course_announcements,
+]
+TOOL_REGISTRY = {tool.name: tool for tool in ALL_TOOLS}
 
 
 def ingest_frontend(state: AgentState) -> AgentState:
     """Inject the frontend payload into the messages before the first LLM call."""
     payload = state.get("frontend_payload") or {}
     frontend_note = json.dumps({"frontend_payload": payload}, ensure_ascii=False)
-    print("Ingest: injecting frontend payload into system context.")
+    print("Ingest: injecting frontend payload into conversation for grounding.")
     new_messages = list(state.get("messages", [])) + [
-        SystemMessage(
-            content=(
-                "Frontend context injected for grounding. "
-                "Use this when deciding what backend JSON to fetch.\n"
-                f"{frontend_note}"
-            )
-        )
+        HumanMessage(content=f"Frontend payload (JSON): {frontend_note}")
     ]
     return {
         **state,
@@ -118,10 +103,10 @@ def _build_system_message() -> SystemMessage:
     return SystemMessage(
         content=(
             "You are a backend retrieval assistant. Policy:\n"
-            "- If the user asks for any data that could be in the backend JSON, "
-            "call the tool search_backend_json. Do not guess values.\n"
+            "- For Canvas course data use the fetch_* Canvas tools (courses, pages, assignments, files, announcements) "
+            "instead of making up answers.\n"
             "- Never hallucinate values; prefer tool calls.\n"
-            "- The backend_json_path is provided; do not assume other data sources.\n"
+            "- Choose the minimal set of tool calls and then respond to the user.\n"
             "- Keep replies concise unless asked otherwise."
         )
     )
@@ -131,12 +116,12 @@ def call_model(state: AgentState) -> Dict[str, Any]:
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-pro",
         api_key=os.getenv("GEMINI_API_KEY"),
-    ).bind_tools([search_backend_json])
+    ).bind_tools(ALL_TOOLS)
 
     messages = [_build_system_message(), *state["messages"]]
     print("LLM: sending messages to Gemini...")
     response = llm.invoke(messages)
-    print("LLM: received response from Gemini.")
+    print(f"LLM: received response from Gemini. Tool calls: {getattr(response, 'tool_calls', None)}")
     return {"messages": [response], "number_of_steps": state.get("number_of_steps", 0) + 1}
 
 
@@ -146,21 +131,27 @@ def call_tool(state: AgentState) -> Dict[str, Any]:
         return {"messages": [], "number_of_steps": state.get("number_of_steps", 0)}
 
     tool_messages: List[ToolMessage] = []
-    backend_json_path = state["backend_json_path"]
 
     for call in last_msg.tool_calls:
         name = call["name"]
         args = call.get("args", {}) or {}
-        if name == "search_backend_json":
-            # Ensure backend_json_path is always provided
-            args["backend_json_path"] = backend_json_path
+        tool = TOOL_REGISTRY.get(name)
+        if not tool:
+            content_str = json.dumps({"error": f"Unknown tool {name}"}, ensure_ascii=False)
+            tool_messages.append(
+                ToolMessage(content=content_str, name=name, tool_call_id=call["id"])
+            )
+            continue
+
         print(f"Tool runner: executing {name} with args={args}")
         try:
-            tool_result = search_backend_json.invoke(args)
-            content_str = json.dumps(tool_result, ensure_ascii=False)
+            tool_result = tool.invoke(args)
+            content_str = json.dumps(tool_result, ensure_ascii=False, default=str)
+        except ValidationError as exc:
+            content_str = json.dumps({"error": exc.errors()}, ensure_ascii=False)
         except Exception as exc:  # pragma: no cover - safety net
             content_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
-        print(f"Tool runner: {name} completed.")
+        print(f"Tool runner: {name} completed with result {content_str}")
         tool_messages.append(
             ToolMessage(
                 content=content_str,
@@ -177,11 +168,11 @@ def call_tool(state: AgentState) -> Dict[str, Any]:
 
 def should_continue(state: AgentState) -> str:
     if not state["messages"]:
-        return END
+        return "end"
     last_msg = state["messages"][-1]
     if isinstance(last_msg, AIMessage) and getattr(last_msg, "tool_calls", None):
-        return "tools"
-    return END
+        return "continue"
+    return "end"
 
 
 def build_graph() -> Any:
@@ -191,7 +182,7 @@ def build_graph() -> Any:
     graph.add_node("tools", call_tool)
 
     graph.add_edge("ingest", "llm")
-    graph.add_conditional_edges("llm", should_continue, {"tools": "tools", END: END})
+    graph.add_conditional_edges("llm", should_continue, {"continue": "tools", "end": END})
     graph.add_edge("tools", "llm")
 
     graph.set_entry_point("ingest")
@@ -205,15 +196,12 @@ def send_prompt_to_backend(
     text: str,
     *,
     frontend_payload: Optional[dict] = None,
-    backend_json_path: Optional[str] = None,
 ) -> str:
     """Entry point to run the graph with a user prompt."""
-    path =  "dummy_data.json"
     initial_state: AgentState = {
         "messages": [HumanMessage(content=text)],
         "number_of_steps": 0,
         "frontend_payload": frontend_payload or {},
-        "backend_json_path": path
     }
     print("Driver: invoking graph with user text.")
     result = compiled_graph.invoke(initial_state)

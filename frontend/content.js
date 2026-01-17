@@ -214,7 +214,7 @@
         .then((res) => res.json())
         .then((data) => {
             console.log("Received response from backend:", data);
-          appendMsg(messagesEl, data && data.reply ? data.reply : "Received your message.", "bot");
+          appendMsg(messagesEl, data && data.reply ? data.reply[0]?.text : "Received your message.", "bot");
         })
         .catch((err) => {
           console.error("Failed to reach backend:", err);
