@@ -1,4 +1,7 @@
 (() => {
+  if (window.__CRX_CANVAS_CHAT_INITIALIZED__) return;
+  window.__CRX_CANVAS_CHAT_INITIALIZED__ = true;
+
   const ROOT_ID = "crx-canvas-chat-root";
   const BACKEND_URL = "http://localhost:5000/message";
   const ARROW_SVG = `
@@ -21,25 +24,32 @@
       <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   `;
-  const STATUS_STEPS = [
+const STATUS_STEPS = [
     "Thinking…",
     "Obtaining information…",
     "Delving into course files…",
     "Extracting relevant data…",
     "Formulating response…",  
   ];
+const STORAGE_KEYS = {
+  open: "crx-chat-open",
+  history: "crx-chat-history",
+};
+let messagesState = [];
 
-  if (document.getElementById(ROOT_ID)) return;
   console.log("Content script loaded");
 
   const createShadowRoot = () => {
-    const root = document.createElement("div");
-    root.id = ROOT_ID;
-    root.style.position = "fixed";
-    root.style.right = "18px";
-    root.style.bottom = "18px";
-    root.style.zIndex = "2147483647";
-    document.documentElement.appendChild(root);
+    let root = document.getElementById(ROOT_ID);
+    if (!root) {
+      root = document.createElement("div");
+      root.id = ROOT_ID;
+      root.style.position = "fixed";
+      root.style.right = "18px";
+      root.style.bottom = "18px";
+      root.style.zIndex = "2147483647";
+      document.documentElement.appendChild(root);
+    }
     return root.attachShadow({ mode: "open" });
   };
 
@@ -468,21 +478,54 @@
     return escaped;
   };
 
-  const appendMsg = (messagesEl, text, who) => {
+  const persistHistory = () => {
+    try {
+      chrome.storage?.local?.set({ [STORAGE_KEYS.history]: messagesState });
+    } catch (e) {
+      try {
+        sessionStorage.setItem(STORAGE_KEYS.history, JSON.stringify(messagesState));
+      } catch (err) {}
+    }
+  };
+
+  const loadHistory = (cb) => {
+    const fallback = () => {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEYS.history);
+        cb(raw ? JSON.parse(raw) : []);
+      } catch (e) {
+        cb([]);
+      }
+    };
+    try {
+      chrome.storage?.local?.get(STORAGE_KEYS.history, (res) => {
+        if (res && res[STORAGE_KEYS.history]) cb(res[STORAGE_KEYS.history]);
+        else fallback();
+      });
+    } catch (e) {
+      fallback();
+    }
+  };
+
+  const appendMsg = (messagesEl, text, who, { persist = true } = {}) => {
     const div = document.createElement("div");
     div.className = `msg ${who}`;
     div.innerHTML = formatText(text);
     messagesEl.appendChild(div);
-    // Smooth scroll to bottom
     messagesEl.scrollTo({
       top: messagesEl.scrollHeight,
       behavior: 'smooth'
     });
+    if (persist) {
+      messagesState.push({ role: who, text });
+      persistHistory();
+    }
   };
 
   const wireEvents = ({ panel, bar, messagesEl, inputEl, sendBtn, closeBtn, maximizeBtn }) => {
     let loadingInterval = null;
     let loadingEl = null;
+    let openState = false;
 
     const clearLoading = () => {
       if (loadingInterval) {
@@ -539,6 +582,14 @@
     const openPanel = () => {
       panel.classList.add("open");
       bar.style.display = "none";
+      openState = true;
+      try {
+        chrome.storage?.local?.set({ "crx-chat-open": true });
+      } catch (e) {
+        try {
+          sessionStorage.setItem("crx-chat-open", "1");
+        } catch (err) {}
+      }
       if (!panel.dataset.greeted) {
         appendMsg(messagesEl, "Hi! I'm AskMyCanvas. Ask me anything.", "bot");
         panel.dataset.greeted = "1";
@@ -552,6 +603,14 @@
       bar.style.display = "grid";
       maximizeBtn.innerHTML = MAXIMIZE_SVG;
       clearLoading();
+      openState = false;
+      try {
+        chrome.storage?.local?.set({ "crx-chat-open": false });
+      } catch (e) {
+        try {
+          sessionStorage.setItem("crx-chat-open", "0");
+        } catch (err) {}
+      }
     };
 
     const toggleMaximize = () => {
@@ -560,6 +619,39 @@
       maximizeBtn.innerHTML = isMaximized ? MINIMIZE_SVG : MAXIMIZE_SVG;
       maximizeBtn.setAttribute("aria-label", isMaximized ? "Minimize" : "Maximize");
     };
+
+    const restoreOpenState = () => {
+      const applyState = (val) => {
+        if (val === true || val === "1" || val === "true") {
+          openPanel();
+        }
+      };
+      try {
+        chrome.storage?.local?.get("crx-chat-open", (res) => {
+          if (res && typeof res["crx-chat-open"] !== "undefined") {
+            applyState(res["crx-chat-open"]);
+          } else {
+            try {
+              applyState(sessionStorage.getItem("crx-chat-open"));
+            } catch (e) {}
+          }
+        });
+      } catch (err) {
+        try {
+          applyState(sessionStorage.getItem("crx-chat-open"));
+        } catch (e) {}
+      }
+    };
+
+    loadHistory((history) => {
+      if (Array.isArray(history)) {
+        messagesState = history;
+        if (history.length) {
+          history.forEach((m) => appendMsg(messagesEl, m.text, m.role, { persist: false }));
+          panel.dataset.greeted = "1";
+        }
+      }
+    });
 
     const send = () => {
       const text = (inputEl.value || "").trim();
@@ -607,9 +699,12 @@
       }
       if (e.key === "Escape") closePanel();
     });
+
+    restoreOpenState();
   };
 
-  const mount = () => {
+  const injectIfMissing = () => {
+    if (document.getElementById(ROOT_ID)) return;
     if (!document.body) return;
 
     const shadow = createShadowRoot();
@@ -626,9 +721,43 @@
     wireEvents({ panel, bar, messagesEl, inputEl, sendBtn, closeBtn, maximizeBtn });
   };
 
+  const observeRootRemoval = () => {
+    const observer = new MutationObserver(() => {
+      if (!document.getElementById(ROOT_ID)) {
+        injectIfMissing();
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  };
+
+  const hookHistory = () => {
+    const fire = () => {
+      const evt = new Event("crx-url-change");
+      window.dispatchEvent(evt);
+    };
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    history.pushState = function () {
+      origPush.apply(this, arguments);
+      fire();
+    };
+    history.replaceState = function () {
+      origReplace.apply(this, arguments);
+      fire();
+    };
+    window.addEventListener("popstate", fire);
+    window.addEventListener("crx-url-change", injectIfMissing);
+  };
+
+  const init = () => {
+    injectIfMissing();
+    observeRootRemoval();
+    hookHistory();
+  };
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", mount, { once: true });
+    document.addEventListener("DOMContentLoaded", init, { once: true });
   } else {
-    mount();
+    init();
   }
 })();
