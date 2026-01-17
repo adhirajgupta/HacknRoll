@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+from sendPrompt import send_prompt_to_backend
 
 app = Flask(__name__)
 
@@ -22,7 +23,14 @@ def handle_message():
     # Log incoming payload
     print(f"Received text: {text}")
 
-    return jsonify({"status": "ok", "echo": text})
+    additional_prompt = "Do not hallucinate. Provide accurate and concise information. If the information is not available, say 'I don't know'. Dont make up answers." \
+    "Dont generate random dates. Now search the following question: "
+
+    print(f"Appended prompt: {additional_prompt + text}")
+
+    reply = send_prompt_to_backend(text, frontend_payload=data)
+    print(f"Generated reply in app.js: {reply}")
+    return jsonify({"status": "ok", "echo": text, "reply": reply})
 
 
 if __name__ == "__main__":

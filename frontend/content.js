@@ -1,25 +1,27 @@
 (() => {
-  // Avoid injecting twice
+  const ROOT_ID = "crx-canvas-chat-root";
+  const BACKEND_URL = "http://localhost:5000/message";
+  const ARROW_SVG = `
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 4l-7 9h5v7h4v-7h5l-7-9z" fill="white"/>
+    </svg>
+  `;
+
+  if (document.getElementById(ROOT_ID)) return;
   console.log("Content script loaded");
-  if (document.getElementById("crx-canvas-chat-root")) return;
 
-  // Some pages can have weird timing; ensure body exists
-  const mount = () => {
-    if (!document.body) return;
-
-    // Root container (in the normal DOM)
+  const createShadowRoot = () => {
     const root = document.createElement("div");
-    root.id = "crx-canvas-chat-root";
+    root.id = ROOT_ID;
     root.style.position = "fixed";
     root.style.right = "18px";
     root.style.bottom = "18px";
-    root.style.zIndex = "2147483647"; // very high
+    root.style.zIndex = "2147483647";
     document.documentElement.appendChild(root);
+    return root.attachShadow({ mode: "open" });
+  };
 
-    // Shadow DOM to isolate styles
-    const shadow = root.attachShadow({ mode: "open" });
-
-    // Styles
+  const createStyle = () => {
     const style = document.createElement("style");
     style.textContent = `
       .bar {
@@ -136,23 +138,16 @@
         cursor: not-allowed;
       }
     `;
-    shadow.appendChild(style);
+    return style;
+  };
 
-    const arrowSvg = `
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 4l-7 9h5v7h4v-7h5l-7-9z" fill="white"/>
-      </svg>
-    `;
-
-    // UI
-    const wrapper = document.createElement("div");
-
+  const createPanel = () => {
     const panel = document.createElement("div");
     panel.className = "panel";
     panel.innerHTML = `
       <div class="header">
         <div>Chatbot</div>
-        <button class="close" aria-label="Close">×</button>
+        <button class="close" aria-label="Close">A-</button>
       </div>
       <div class="messages" id="messages"></div>
       <div class="composer">
@@ -161,35 +156,37 @@
       </div>
     `;
 
+    return {
+      panel,
+      messagesEl: panel.querySelector("#messages"),
+      inputEl: panel.querySelector("#input"),
+      sendBtn: panel.querySelector("#sendBtn"),
+      closeBtn: panel.querySelector(".close"),
+    };
+  };
+
+  const createBar = () => {
     const bar = document.createElement("div");
     bar.className = "bar";
     bar.title = "Open chat";
-    bar.innerHTML = arrowSvg;
+    bar.innerHTML = ARROW_SVG;
+    return bar;
+  };
 
-    wrapper.appendChild(panel);
-    wrapper.appendChild(bar);
-    shadow.appendChild(wrapper);
+  const appendMsg = (messagesEl, text, who) => {
+    const div = document.createElement("div");
+    div.className = `msg ${who}`;
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
 
-    const messagesEl = panel.querySelector("#messages");
-    const inputEl = panel.querySelector("#input");
-    const sendBtn = panel.querySelector("#sendBtn");
-    const closeBtn = panel.querySelector(".close");
-
-    const appendMsg = (text, who) => {
-      const div = document.createElement("div");
-      div.className = `msg ${who}`;
-      div.textContent = text;
-      messagesEl.appendChild(div);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    };
-
+  const wireEvents = ({ panel, bar, messagesEl, inputEl, sendBtn, closeBtn }) => {
     const openPanel = () => {
       panel.classList.add("open");
-      bar.innerHTML = arrowSvg;
-      bar.title = "Close chat";
-      // greet once
+      bar.style.display = "none";
       if (!panel.dataset.greeted) {
-        appendMsg("Hi! I'm a dummy chatbot. Ask me anything.", "bot");
+        appendMsg(messagesEl, "Hi! I'm a dummy chatbot. Ask me anything.", "bot");
         panel.dataset.greeted = "1";
       }
       setTimeout(() => inputEl.focus(), 0);
@@ -197,47 +194,58 @@
 
     const closePanel = () => {
       panel.classList.remove("open");
-      bar.innerHTML = arrowSvg;
-      bar.title = "Open chat";
-    };
-
-    const togglePanel = () => {
-      if (panel.classList.contains("open")) closePanel();
-      else openPanel();
+      bar.style.display = "grid";
     };
 
     const send = () => {
       const text = (inputEl.value || "").trim();
       if (!text) return;
 
-      appendMsg(text, "user");
+      appendMsg(messagesEl, text, "user");
       inputEl.value = "";
 
       console.log("Sending message to backend:", text);
 
-      fetch("http://localhost:5000/message", {
+      fetch(BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       })
         .then((res) => res.json())
         .then((data) => {
-          appendMsg(data.echo || "Received your message.", "bot");
+            console.log("Received response from backend:", data);
+          appendMsg(messagesEl, data && data.reply ? data.reply[0]?.text : "Received your message.", "bot");
         })
         .catch((err) => {
           console.error("Failed to reach backend:", err);
-          appendMsg("Backend error: could not send message.", "bot");
+          appendMsg(messagesEl, "Backend error: could not send message.", "bot");
         });
     };
 
-    bar.addEventListener("click", togglePanel);
+    bar.addEventListener("click", openPanel);
     closeBtn.addEventListener("click", closePanel);
-
     sendBtn.addEventListener("click", send);
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") send();
       if (e.key === "Escape") closePanel();
     });
+  };
+
+  const mount = () => {
+    if (!document.body) return;
+
+    const shadow = createShadowRoot();
+    shadow.appendChild(createStyle());
+
+    const wrapper = document.createElement("div");
+    const { panel, messagesEl, inputEl, sendBtn, closeBtn } = createPanel();
+    const bar = createBar();
+
+    wrapper.appendChild(panel);
+    wrapper.appendChild(bar);
+    shadow.appendChild(wrapper);
+
+    wireEvents({ panel, bar, messagesEl, inputEl, sendBtn, closeBtn });
   };
 
   if (document.readyState === "loading") {
