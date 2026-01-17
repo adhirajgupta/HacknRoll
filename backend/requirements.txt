@@ -1,0 +1,9 @@
+flask
+canvasapi
+langchain-core
+langgraph
+langchain-google-genai
+pydantic
+typing
+python-dotenv
+requests
