@@ -6,8 +6,23 @@ API_KEY = "21450~tcuXB7Ex8yQw7MPyh7GmDXBLzrw8mNu3wGwTHAkhN2zzQTkk768Tm2ZWP77f3yy
 
 canvas = Canvas(API_URL, API_KEY)
 
+def get_courses():
+    output = []
+    for course in canvas.get_courses():
+        try:
+            if '[2520]' in course.name:
+                output.append(
+                    {
+                        "id": course.id,
+                        "name": course.name,
+                    }
+                )
+        except AttributeError:
+            continue
+    return output
 
-def get_course_pages(course):
+def get_course_pages(course_id):
+    course = canvas.get_course(course_id)
     output = []
     try:
         pages = course.get_pages()
@@ -22,7 +37,8 @@ def get_course_pages(course):
     return output
 
 
-def get_course_assignments(course):
+def get_course_assignments(course_id):
+    course = canvas.get_course(course_id)
     try:
         output = []
         assignments = course.get_assignments()
@@ -45,7 +61,8 @@ def get_course_assignments(course):
     return output
 
 
-def get_course_files(course):
+def get_course_files(course_id):
+    course = canvas.get_course(course_id)
     output = []
     try:
         files = course.get_files()
@@ -61,7 +78,8 @@ def get_course_files(course):
         return {"Error": "No files available for course"}
     return output
 
-def get_course_announcements(course):
+def get_course_announcements(course_id):
+    course = canvas.get_course(course_id)
     announcements = []
     try:
         for announcement in canvas.get_announcements([course]):
