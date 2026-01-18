@@ -1,11 +1,13 @@
 import canvasapi
 from canvasapi import Canvas
+from dotenv import load_dotenv
+
+import os
+
+load_dotenv()
 
 API_URL = "https://canvas.nus.edu.sg"
-# API_KEY = "21450~tcuXB7Ex8yQw7MPyh7GmDXBLzrw8mNu3wGwTHAkhN2zzQTkk768Tm2ZWP77f3yyL"
-
-API_KEY = "21450~7MHmATRNnC4uUvvaGLFnw8GDwuku28GWhwTB4wBMYYB83xzRJkBhUnChCfyXFAKr"
-
+API_KEY = os.getenv("API_KEY")  # Ensure
 canvas = Canvas(API_URL, API_KEY)
 
 def get_courses():
