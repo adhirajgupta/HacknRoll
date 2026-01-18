@@ -41,35 +41,64 @@ class CourseInput(BaseModel):
 
 @tool(args_schema=CourseInput)
 def fetch_course_pages(course_id: int) -> Dict[str, Any]:
-    """Return Canvas course pages (title/html); use when asked for page content/list of pages."""
+    """
+    TOOL SCHEMA — What it does: Fetch all pages in a Canvas course and return their titles and bodies.
+    When to use: Use this first when you need some information about the course. If your question is about course content, course policy, assessment components and dates of important exams of the course,use pages to get the answer. 
+    If the answer is not found or you run into an error, try other tools.
+    Inputs: course_id (Canvas course ID)
+    Output: list of dicts {title, html} or an error dict.
+    """
     print(f"Tool fetch_course_pages: running for course_id={course_id}")
     return {"pages": get_course_pages(course_id)}
 
 
 @tool(args_schema=CourseInput)
 def fetch_course_assignments(course_id: int) -> Dict[str, Any]:
-    """Return Canvas course assignments with metadata; use when asked about assignments or due details."""
+    """
+    TOOL SCHEMA — What it does: Fetch all assignments for a Canvas course with grading, timing, and submission metadata.
+    When to use: User asks about assignments, due dates of assignments, points, or submission status.
+    Do not use: User asks about general midterm dates or final exam dates or assessment components/weightages
+    If the answer is not found or you run into an error, try other tools.
+    Inputs: course_id (Canvas course ID)
+    Output: list of dicts {name, description, points_possible, grading_type, due_at, lock_at, unlock_at, submission_types, html_url, allowed_attempts, submission_status} or an error dict.
+    """
     print(f"Tool fetch_course_assignments: running for course_id={course_id}")
     return {"assignments": get_course_assignments(course_id)}
 
 
 @tool(args_schema=CourseInput)
 def fetch_course_files(course_id: int) -> Dict[str, Any]:
-    """Return Canvas course files with metadata and URLs; use when asked about files/resources."""
+    """
+    TOOL SCHEMA — What it does: List all files in a Canvas course with metadata and download URLs.
+    When to use: User asks for course files, resources, or download links.
+    If the answer is not found or you run into an error, try other tools.
+    Inputs: course_id (Canvas course ID)
+    Output: list of dicts {name, created_at, updated_at, url, content_type} or an error dict.
+    """
     print(f"Tool fetch_course_files: running for course_id={course_id}")
     return {"files": get_course_files(course_id)}
 
 
 @tool(args_schema=CourseInput)
 def fetch_course_announcements(course_id: int) -> Dict[str, Any]:
-    """Return Canvas course announcements; use when asked about announcements/notices."""
+    """
+    TOOL SCHEMA — What it does: Fetch announcements for a Canvas course with content and timestamps.
+    When to use: To get additional data about the course which might contain the answer to a user's query.
+    If the answer is not found or you run into an error, try other tools.
+    Inputs: course_id (Canvas course ID)
+    Output: list of dicts {title, message, posted_at, attachments} or an error dict.
+    """
     print(f"Tool fetch_course_announcements: running for course_id={course_id}")
     return {"announcements": get_course_announcements(course_id)}
 
 
 @tool
 def fetch_courses() -> Dict[str, Any]:
-    """List available courses; use to let the user pick a course before fetching details."""
+    """ TOOL SCHEMA - What it does: List Canvas courses the user is enrolled in.
+        When to use: This should usually be your initial task. Use this to select a course and get course id to execute other actions. 
+        The user may not always type the full course code or course name, select the most appropriate based on their query, or ask them to clarify if needed.
+        Inputs: none (uses authenticated Canvas client)
+        Output: list of dicts {id, name}."""
     print("Tool fetch_courses: listing courses")
     return {"courses": get_courses()}
 
@@ -105,8 +134,10 @@ def _build_system_message() -> SystemMessage:
             "You are a backend retrieval assistant. Policy:\n"
             "- For Canvas course data use the fetch_* Canvas tools (courses, pages, assignments, files, announcements) "
             "instead of making up answers.\n"
+            "- If a course ID is unclear, first call fetch_courses to list options and/or ask the user to pick one.\n"
             "- Never hallucinate values; prefer tool calls.\n"
-            "- Choose the minimal set of tool calls and then respond to the user.\n"
+            "- If tool output is empty / missing requested fields, do NOT answer. Call another tool or ask a clarifying question.\n"
+            "- Choose the optimal amount of tool calls and never above 4 tool calls then respond to the user.\n"
             "- Keep replies concise unless asked otherwise."
         )
     )
@@ -196,10 +227,14 @@ def send_prompt_to_backend(
     text: str,
     *,
     frontend_payload: Optional[dict] = None,
+    existing_messages: Optional[Sequence[BaseMessage]] = None,
 ) -> str:
     """Entry point to run the graph with a user prompt."""
+    base_messages: List[BaseMessage] = list(existing_messages or [])
+    base_messages.append(HumanMessage(content=text))
+
     initial_state: AgentState = {
-        "messages": [HumanMessage(content=text)],
+        "messages": base_messages,
         "number_of_steps": 0,
         "frontend_payload": frontend_payload or {},
     }
@@ -214,9 +249,3 @@ def send_prompt_to_backend(
     print(f"Driver: final Gemini reply -> {final_text}")
     return final_text
 
-
-if __name__ == "__main__":
-    send_prompt_to_backend(
-        "What is the description and points for Assignment 05?",
-        frontend_payload={"user_id": "123", "course_id": "ABC"},
-    )

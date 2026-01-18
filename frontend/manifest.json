@@ -3,6 +3,7 @@
   "name": "Canvas Chat Bar",
   "version": "1.0.0",
   "description": "Auto-injects a chat bar into webpages.",
+  "permissions": ["storage"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
